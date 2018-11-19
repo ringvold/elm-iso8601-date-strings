@@ -326,24 +326,50 @@ iso8601 =
                             , succeed 0
                             ]
                         -- SSS
-                        |= oneOf
-                            [ -- "Z" means UTC
-                              map (\_ -> 0) (symbol "Z")
-
-                            -- +05:00 means UTC+5 whereas -11:30 means UTC-11.5
-                            , succeed utcOffsetMinutesFromParts
-                                |= oneOf
-                                    [ map (\_ -> 1) (symbol "+")
-                                    , map (\_ -> -1) (symbol "-")
-                                    ]
-                                |= paddedInt 2
-                                |. symbol ":"
-                                |= paddedInt 2
-                            ]
+                        |= utcOffsetInMinutes
                     , succeed (fromParts datePart 0 0 0 0 0)
                         |. end
                     ]
             )
+
+
+utcOffsetInMinutes : Parser Int
+utcOffsetInMinutes =
+    let
+        offsetInMinutes : Int -> Int -> Int
+        offsetInMinutes hours minutes =
+            (hours * 60) + minutes
+
+        utcOffsetMinutesFromParts : Int -> Int -> Int
+        utcOffsetMinutesFromParts multiplier calculatedOffset =
+            -- multiplier is either 1 or -1 (for negative UTC offsets)
+            multiplier * calculatedOffset
+    in
+    Parser.succeed identity
+        |= oneOf
+            [ -- "Z" means UTC
+              map (\_ -> 0) (symbol "Z")
+
+            -- +05:00 means UTC+5 whereas -11:30 means UTC-11.5
+            , succeed utcOffsetMinutesFromParts
+                |= oneOf
+                    [ map (\_ -> 1) (symbol "+")
+                    , map (\_ -> -1) (symbol "-")
+                    ]
+                -- support 01, 0100 and 01:00
+                |= oneOf
+                    [ succeed offsetInMinutes
+                        |= paddedInt 2
+                        |= succeed 0
+                    , succeed offsetInMinutes
+                        |= paddedInt 2
+                        |= paddedInt 2
+                    , succeed offsetInMinutes
+                        |= paddedInt 2
+                        |. symbol ":"
+                        |= paddedInt 2
+                    ]
+            ]
 
 
 {-| Parse fractions of a second, and convert to milliseconds
@@ -397,12 +423,6 @@ monthYearDayInMs =
             ]
         -- DD
         |> Parser.andThen yearMonthDay
-
-
-utcOffsetMinutesFromParts : Int -> Int -> Int -> Int
-utcOffsetMinutesFromParts multiplier hours minutes =
-    -- multiplier is either 1 or -1 (for negative UTC offsets)
-    multiplier * ((hours * 60) + minutes)
 
 
 {-| Inflate a Posix integer into a more memory-intensive ISO-8601 date string.
